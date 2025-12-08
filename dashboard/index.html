@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>UDT-EM Prototype Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      display: flex;
+      height: 100vh;
+      color: #222;
+    }
+
+    #sidebar {
+      width: 420px;
+      padding: 16px;
+      border-right: 1px solid #ddd;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    #map {
+      flex: 1;
+    }
+
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: 20px;
+    }
+
+    button {
+      padding: 8px 12px;
+      border-radius: 6px;
+      border: 1px solid #ccc;
+      background-color: #f5f5f5;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 4px;
+    }
+
+    button:hover {
+      background-color: #e9e9e9;
+    }
+
+    .panel {
+      border-radius: 8px;
+      border: 1px solid #eee;
+      padding: 8px 10px;
+      font-size: 13px;
+      background: #fafafa;
+      max-height: 200px;
+      overflow: auto;
+      white-space: pre-wrap;
+    }
+
+    .kpi {
+      font-size: 14px;
+      line-height: 1.4;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      border-radius: 999px;
+      font-size: 11px;
+      margin-left: 6px;
+      color: #fff;
+    }
+
+    .badge-green { background: #2e7d32; }
+    .badge-orange { background: #ed6c02; }
+    .badge-red { background: #c62828; }
+
+    .small {
+      font-size: 11px;
+      color: #666;
+    }
+
+    .kpi-bar {
+      display: flex;
+      gap: 8px;
+    }
+
+    .kpi-card {
+      flex: 1;
+      background: #f9f9f9;
+      border-radius: 8px;
+      border: 1px solid #eee;
+      padding: 6px 8px;
+      font-size: 12px;
+    }
+
+    .kpi-label {
+      font-size: 11px;
+      color: #666;
+    }
+
+    .kpi-value {
+      font-size: 16px;
+      font-weight: 600;
+    }
+
+    .road-list {
+      max-height: 200px;
+      overflow-y: auto;
+      border-radius: 8px;
+      border: 1px solid #eee;
+      background: #fcfcfc;
+    }
+
+    .road-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 8px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+
+    .road-row:nth-child(odd) {
+      background: #f9f9f9;
+    }
+
+    .road-row:hover {
+      background: #eceff1;
+    }
+
+    .road-row.selected {
+      background: #e3f2fd;
+      font-weight: 600;
+    }
+
+    .road-id {
+      font-weight: 600;
+    }
+
+    .road-meta {
+      font-size: 11px;
+      color: #555;
+    }
+
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .row > div {
+      flex: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="sidebar">
+    <h1>UDT-EM Prototype</h1>
+    <div class="small">
+      Multiple simulated sensor streams update road congestion in real time. Select a road to inspect its state and route to the hospital.
+    </div>
+
+    <div class="kpi-bar">
+      <div class="kpi-card">
+        <div class="kpi-label">Active sensors</div>
+        <div class="kpi-value" id="kpiSensors">–</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Active roads</div>
+        <div class="kpi-value" id="kpiRoads">–</div>
+      </div>
+      <div class="kpi-card">
+        <div class="kpi-label">Events/sec (approx)</div>
+        <div class="kpi-value" id="kpiRate">–</div>
+      </div>
+    </div>
+
+    <div>
+      <button onclick="refreshState()">Refresh Twin State</button>
+      <button onclick="loadRoute()">Get Route for Selected Road</button>
+    </div>
+
+    <div class="row">
+      <div>
+        <div class="section-title">Roads overview</div>
+        <div class="road-list" id="roadList">
+          <!-- Filled dynamically -->
+        </div>
+      </div>
+      <div>
+        <div class="section-title">Selected road</div>
+        <div class="panel kpi" id="kpiSelected">
+          No road selected yet.
+        </div>
+      </div>
+    </div>
+
+    <div class="section-title">Raw twin state (debug)</div>
+    <div class="panel" id="raw">
+      {}
+    </div>
+  </div>
+
+  <div id="map"></div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <script>
+    const TWIN_STATE_URL = "http://localhost:8003/state";
+    const TWIN_METRICS_URL = "http://localhost:8003/metrics";
+    const ROUTE_BASE_URL = "http://localhost:8004/route/";
+
+    const cityCenter = [42.35, 13.40];
+    const incidentPoint = [42.36, 13.39];
+    const hospitalPoint = [42.34, 13.41];
+
+    let map;
+    let routeLine;
+    let selectedRoadId = null;
+    let lastTwinState = {};
+
+    function setRouteColor(congestion) {
+      if (congestion <= 30) return "#2e7d32";
+      if (congestion <= 70) return "#ed6c02";
+      return "#c62828";
+    }
+
+    function congestionBadge(congestion) {
+      let cls = "badge-green";
+      let label = "LOW";
+      if (congestion > 70) { cls = "badge-red"; label = "HIGH"; }
+      else if (congestion > 30) { cls = "badge-orange"; label = "MEDIUM"; }
+
+      return `<span class="badge ${cls}">${label}</span>`;
+    }
+
+    async function refreshMetrics() {
+      try {
+        const res = await fetch(TWIN_METRICS_URL);
+        const data = await res.json();
+
+        document.getElementById("kpiSensors").innerText =
+          data.active_sensors ?? "0";
+        document.getElementById("kpiRoads").innerText =
+          data.active_roads ?? "0";
+        document.getElementById("kpiRate").innerText =
+          data.events_per_sec_approx
+            ? data.events_per_sec_approx.toFixed(1)
+            : "0.0";
+      } catch (err) {
+        // silent fail in UI, no need to spam
+      }
+    }
+
+    function selectRoad(roadId) {
+      selectedRoadId = roadId;
+      updateSelectedKpi();
+      highlightSelectedRoadRow();
+    }
+
+    function highlightSelectedRoadRow() {
+      const list = document.getElementById("roadList");
+      const rows = list.querySelectorAll(".road-row");
+      rows.forEach(row => {
+        if (row.dataset.roadId === selectedRoadId) {
+          row.classList.add("selected");
+        } else {
+          row.classList.remove("selected");
+        }
+      });
+    }
+
+    function buildRoadList() {
+      const roadListDiv = document.getElementById("roadList");
+      roadListDiv.innerHTML = "";
+
+      const entries = Object.entries(lastTwinState);
+      if (entries.length === 0) {
+        roadListDiv.innerHTML = "<div class='road-row'>No roads yet. Wait for sensor data.</div>";
+        return;
+      }
+
+      // Sort by congestion descending
+      entries.sort((a, b) => (b[1].congestion || 0) - (a[1].congestion || 0));
+
+      entries.forEach(([roadId, info]) => {
+        const row = document.createElement("div");
+        row.className = "road-row";
+        row.dataset.roadId = roadId;
+
+        const left = document.createElement("div");
+        left.innerHTML = `<span class="road-id">${roadId}</span>`;
+
+        const right = document.createElement("div");
+        right.style.textAlign = "right";
+
+        const c = info.congestion ?? "?";
+        const sensor = info.last_sensor || info.lastSensor || "—";
+
+        right.innerHTML =
+          `${c} ${congestionBadge(c)}<div class="road-meta">last sensor: ${sensor}</div>`;
+
+        row.appendChild(left);
+        row.appendChild(right);
+        row.addEventListener("click", () => selectRoad(roadId));
+        roadListDiv.appendChild(row);
+      });
+
+      if (!selectedRoadId && entries.length > 0) {
+        selectedRoadId = entries[0][0];
+      }
+      highlightSelectedRoadRow();
+    }
+
+    function updateSelectedKpi() {
+      const kpiBox = document.getElementById("kpiSelected");
+
+      if (!selectedRoadId) {
+        kpiBox.innerHTML = "No road selected yet.";
+        return;
+      }
+
+      const road = lastTwinState[selectedRoadId];
+      if (!road) {
+        kpiBox.innerHTML = `Road <strong>${selectedRoadId}</strong> not present in twin state.`;
+        return;
+      }
+
+      const c = road.congestion;
+      const ts = road.timestamp || "unknown";
+      const sensor = road.last_sensor || road.lastSensor || "—";
+
+      kpiBox.innerHTML =
+        `Road <strong>${selectedRoadId}</strong><br>` +
+        `Congestion: <strong>${c}</strong> ${congestionBadge(c)}<br>` +
+        `Last sensor: <strong>${sensor}</strong><br>` +
+        `<span class="small">Last update: ${ts}</span>`;
+    }
+
+    async function refreshState() {
+      try {
+        const res = await fetch(TWIN_STATE_URL);
+        const data = await res.json();
+        lastTwinState = data;
+
+        document.getElementById("raw").innerText =
+          JSON.stringify(data, null, 2);
+
+        buildRoadList();
+        updateSelectedKpi();
+      } catch (err) {
+        document.getElementById("kpiSelected").innerText =
+          "Failed to load twin state: " + err;
+      }
+    }
+
+    async function loadRoute() {
+      if (!selectedRoadId) {
+        document.getElementById("kpiSelected").innerText =
+          "Select a road first from the list.";
+        return;
+      }
+
+      const url = ROUTE_BASE_URL + encodeURIComponent(selectedRoadId);
+
+      try {
+        const res = await fetch(url);
+        const data = await res.json();
+        const kpiBox = document.getElementById("kpiSelected");
+
+        if (data.error) {
+          kpiBox.innerText = "Routing error: " + data.error;
+          return;
+        }
+
+        if (data.known === false) {
+          kpiBox.innerHTML =
+            `Routing: road <strong>${selectedRoadId}</strong> unknown in twin state.`;
+          return;
+        }
+
+        const c = data.congestion;
+        const eta = data.estimated_travel_time_min;
+
+        kpiBox.innerHTML =
+          `Route: <strong>${selectedRoadId} → Hospital</strong><br>` +
+          `Congestion: <strong>${c}</strong> ${congestionBadge(c)}<br>` +
+          `Estimated travel time: <strong>${eta} min</strong>`;
+
+        const color = setRouteColor(c);
+        if (routeLine) {
+          map.removeLayer(routeLine);
+        }
+        routeLine = L.polyline([incidentPoint, hospitalPoint], {
+          color: color,
+          weight: 5
+        }).addTo(map);
+
+      } catch (err) {
+        document.getElementById("kpiSelected").innerText =
+          "Failed to load route: " + err;
+      }
+    }
+
+    window.addEventListener("load", () => {
+      if (typeof L === "undefined") {
+        document.getElementById("kpiSelected").innerText =
+          "Leaflet failed to load (L is undefined). Check your internet connection or CDN access.";
+        return;
+      }
+
+      map = L.map("map").setView(cityCenter, 13);
+
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: '&copy; OpenStreetMap contributors'
+      }).addTo(map);
+
+      L.marker(incidentPoint).addTo(map).bindPopup("Incident area / road segment");
+      L.marker(hospitalPoint).addTo(map).bindPopup("Hospital");
+
+      routeLine = L.polyline([incidentPoint, hospitalPoint], {
+        color: "#888",
+        weight: 5
+      }).addTo(map);
+
+      map.fitBounds(routeLine.getBounds(), { padding: [30, 30] });
+
+      // periodic updates
+      setInterval(refreshState, 5000);
+      setInterval(refreshMetrics, 5000);
+
+      // initial
+      refreshState();
+      refreshMetrics();
+    });
+  </script>
+</body>
+</html>
