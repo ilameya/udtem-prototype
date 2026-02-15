@@ -4,13 +4,12 @@ import time
 import random
 import requests
 
-# Target: ~100,000 events/min ≈ 1,667 events/sec
 EDGE_URL = "http://127.0.0.1:8001/event"
 
 NUM_SENSORS = 100             # number of simulated streams (aggregated)
-NUM_ROADS = 100              # distinct roads (R1..R200)
-TARGET_EVENTS_PER_SEC = 1000 # ≈ 60,000 events per minute
-RUN_DURATION_SECONDS = 60    # how long to run the test
+NUM_ROADS = 100              # distinct roads (R1..R100)
+TARGET_EVENTS_PER_SEC = 800 # ≈ 48,000 events per minute
+RUN_DURATION_SECONDS = 60    
 
 PER_SENSOR_RATE = TARGET_EVENTS_PER_SEC / NUM_SENSORS
 PER_SENSOR_INTERVAL = 1.0 / PER_SENSOR_RATE  # seconds between sends per sensor
