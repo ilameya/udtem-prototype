@@ -18,11 +18,11 @@ Everything runs in Docker.
 ---
 
 ## Architecture
-![UDT-EM Architecture](udtem.png)
+![UDT-EM Architecture](udtem.jpg)
 
 The architecture diagram represents the full UDT-EM system, including ingestion, event streaming, the digital twin core, routing, analytics, alerts, and dashboards.
 
-This prototype intentionally focuses on **only one subsystem** of that architecture:
+This prototype focuses on **only one subsystem** of that architecture:
 
 #### Routing & Accessibility Service (Prototype)
 
@@ -74,6 +74,7 @@ docker compose up
 ### 4. Start the Sensors (Terminal 2)
 
 ```bash
+cd sensor/
 python load_generator.py
 ```
 
